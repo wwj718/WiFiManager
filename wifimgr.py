@@ -2,66 +2,45 @@ import network
 import socket
 import ure
 import time
+import gc
+# gc.enable()
 
-ap_ssid = "WifiManager"
-ap_password = "tayfunulu"
+'''
+需求，用户设置wifi
+之后还可以改
+main的功能就是设置wifi
+
+启动web使用硬件 这样就能切换
+
+目前的这个设计是没有wifi的时候 设置wifi
+os.remove("wifimgr.py")
+
+https://github.com/tayfunulu/WiFiManager/issues/5: esp8266 nodemcu - runs out of memory loading page
+
+官方的做法 配置好之后return出去 否则一只while
+'''
+
+ap_ssid = "happycoding"
+ap_password = "12345678"
 ap_authmode = 3  # WPA2
 
 NETWORK_PROFILES = 'wifi.dat'
 
+import network
 wlan_ap = network.WLAN(network.AP_IF)
 wlan_sta = network.WLAN(network.STA_IF)
+# wlan_sta.
 
 server_socket = None
 
+if wlan_sta.isconnected():
+    # ap_ssid = wlan_sta.ifconfig.ip # ip
+    ap_ssid = "C_"+wlan_sta.ifconfig()[0]
+    wlan_ap.config(essid=ap_ssid, password=ap_password, authmode=ap_authmode)
 
 def get_connection():
-    """return a working WLAN(STA_IF) instance or None"""
-
-    # First check if there already is any connection:
-    if wlan_sta.isconnected():
-        return wlan_sta
-
-    connected = False
-    try:
-        # ESP connecting to WiFi takes time, wait a bit and try again:
-        time.sleep(3)
-        if wlan_sta.isconnected():
-            return wlan_sta
-
-        # Read known network profiles from file
-        profiles = read_profiles()
-
-        # Search WiFis in range
-        wlan_sta.active(True)
-        networks = wlan_sta.scan()
-
-        AUTHMODE = {0: "open", 1: "WEP", 2: "WPA-PSK", 3: "WPA2-PSK", 4: "WPA/WPA2-PSK"}
-        for ssid, bssid, channel, rssi, authmode, hidden in sorted(networks, key=lambda x: x[3], reverse=True):
-            ssid = ssid.decode('utf-8')
-            encrypted = authmode > 0
-            print("ssid: %s chan: %d rssi: %d authmode: %s" % (ssid, channel, rssi, AUTHMODE.get(authmode, '?')))
-            if encrypted:
-                if ssid in profiles:
-                    password = profiles[ssid]
-                    connected = do_connect(ssid, password)
-                else:
-                    print("skipping unknown encrypted network")
-            else:  # open
-                connected = do_connect(ssid, None)
-            if connected:
-                break
-
-    except OSError as e:
-        print("exception", str(e))
-
-    # start web server for connection manager:
-    if not connected:
-        connected = start()
-
-    return wlan_sta if connected else None
-
-
+    connected = start()
+    return connected
 def read_profiles():
     with open(NETWORK_PROFILES) as f:
         lines = f.readlines()
@@ -111,7 +90,7 @@ def send_response(client, payload, status_code=200):
 
 def handle_root(client):
     wlan_sta.active(True)
-    ssids = sorted(ssid.decode('utf-8') for ssid, *_ in wlan_sta.scan())
+    ssids = sorted(ssid.decode('utf-8') for ssid, *_ in wlan_sta.scan()[:10]) #截取部分 不然内存会超出
 
     response = []
     response.append("""\
@@ -150,29 +129,13 @@ def handle_root(client):
             <hr />
             <h5>
                 <span style="color: #ff0000;">
-                    Your ssid and password information will be saved into the
-                    "%(filename)s" file in your ESP module for future usage.
-                    Be careful about security!
+                    说明:xxx
                 </span>
             </h5>
-            <hr />
-            <h2 style="color: #2e6c80;">
-                Some useful infos:
-            </h2>
-            <ul>
-                <li>
-                    Original code from <a href="https://github.com/cpopp/MicroPythonSamples"
-                        target="_blank" rel="noopener">cpopp/MicroPythonSamples</a>.
-                </li>
-                <li>
-                    This code available at <a href="https://github.com/tayfunulu/WiFiManager"
-                        target="_blank" rel="noopener">tayfunulu/WiFiManager</a>.
-                </li>
-            </ul>
-        </html>
-    """ % dict(filename=NETWORK_PROFILES))
-    send_response(client, "\n".join(response))
 
+        </html>
+    """) # % dict(filename=NETWORK_PROFILES))
+    send_response(client, "\n".join(response))
 
 def handle_configure(client, request):
     match = ure.search("ssid=([^&]*)&password=(.*)", request)
@@ -233,7 +196,6 @@ def handle_configure(client, request):
         send_response(client, response)
         return False
 
-
 def handle_not_found(client, url):
     send_response(client, "Path not found: {}".format(url), status_code=404)
 
@@ -245,7 +207,6 @@ def stop():
         server_socket.close()
         server_socket = None
 
-
 def start(port=80):
     global server_socket
 
@@ -256,21 +217,21 @@ def start(port=80):
     wlan_sta.active(True)
     wlan_ap.active(True)
 
-    wlan_ap.config(essid=ap_ssid, password=ap_password, authmode=ap_authmode)
-
+    # wlan_ap.config(essid=ap_ssid, password=ap_password, authmode=ap_authmode)
     server_socket = socket.socket()
     server_socket.bind(addr)
-    server_socket.listen(1)
-
-    print('Connect to WiFi ssid ' + ap_ssid + ', default password: ' + ap_password)
-    print('and access the ESP via your favorite web browser at 192.168.4.1.')
-    print('Listening on:', addr)
+    server_socket.listen(1) # 内存不够
 
     while True:
-
+        
         if wlan_sta.isconnected():
-            return True
-
+            pass
+            # 不必一直设置, 看名字 重启
+            # ap_ssid = "C_"+wlan_sta.ifconfig()[0]
+            # wlan_ap.config(essid=ap_ssid, password=ap_password, authmode=ap_authmode)
+            # 改wifi名字
+            # return True
+        
         client, addr = server_socket.accept()
         print('client connected from', addr)
         try:
@@ -304,3 +265,5 @@ def start(port=80):
 
         finally:
             client.close()
+            gc.collect()
+            print(gc.mem_free()) #每次都回收了
